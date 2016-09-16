@@ -1,0 +1,7 @@
+# credentials
+_env*
+vault.keys
+*.asc
+
+# macos frustration
+.DS_Store
