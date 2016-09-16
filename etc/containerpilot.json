@@ -1,0 +1,33 @@
+{
+  "consul": "127.0.0.1:8500",
+  "preStart": ["/usr/local/bin/vault-manage", "preStart"],
+  "services": [
+    {
+      "name": "consul",
+      "port": 8500,
+      "health": ["/usr/local/bin/vault-manage", "consul-health"],
+      "poll": 10,
+      "ttl": 25
+    },
+    {
+      "name": "vault",
+      "port": 8200,
+      "health": ["/usr/local/bin/vault-manage", "vault-health"],
+      "poll": 10,
+      "ttl": 25
+    }
+  ],
+  "backends": [
+    {
+      "name": "vault",
+      "poll": 10,
+      "onChange": ["/usr/local/bin/vault-manage", "consul-onchange"]
+    }
+  ],
+  "coprocesses": [
+    {
+      "command": ["/bin/vault", "server", "-config", "/etc/vault.hcl"],
+      "restarts": "unlimited"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# Service definition for Vault cluster with a minimum of 3 nodes.
+# Nodes will use Triton CNS for the service (passed in via the CONSUL
+# env var) to find each other and bootstrap the cluster.
+
+consul-vault:
+    image: autopilotpattern/vault:latest
+    labels:
+      - triton.cns.services=vault,consul
+    restart: always
+    mem_limit: 128m
+    ports:
+        - 8500
+    dns:
+       - 127.0.0.1
+    env_file:
+      - _env
+    command: >
+      /usr/local/bin/containerpilot
+      /bin/consul agent -server
+        -bootstrap-expect 3
+        -config-dir=/etc/consul
+        -ui-dir /ui
