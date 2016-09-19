@@ -2,11 +2,31 @@
 set -e -o pipefail
 
 help() {
-    echo
-    echo 'Usage ./setup.sh'
-    echo
-    echo 'Checks that your Triton and Docker environment is sane and configures'
-    echo 'an environment file to use.'
+cat << EOF
+Usage: ./setup.sh [options] <command>
+--------------------------------------------------------------------------------
+setup.sh check:
+	Checks that your Triton and Docker environment is sane and configures
+	an environment file with a CNS record for Consul.
+
+setup.sh init:
+	Initializes a started Vault cluster. Creates encrypted keyfiles for each
+	operator's public key, which should be redistributed back to operators
+	out-of-band. Use the following options:
+
+	--keys/-k "<val>,<val>":
+		List of public keys used to initialize the vault. These keys
+		must be base64 encoded public keys without ASCII armoring.
+	--threshold/-t <val>:
+		Optional number of keys required to unseal the vault. Defaults
+		to 1 if a single --keys argument was provided, otherwise 2.
+
+setup.sh unseal [keyfile]:
+	Unseals a Vault with the provided operator's key. Requires access to all
+	Vault nodes via 'docker exec'. A number of operator keys equal to the
+	'--threshold' parameter (above) must be used to unseal the Vault.
+EOF
+
 }
 
 # populated by `check` function whenever we're using Triton
@@ -113,7 +133,8 @@ unseal() {
 }
 
 
-# Check for correct configuration and setup _env file
+# Check for correct configuration for running on Triton.
+# Create _env file with CNS name for Consul.
 check() {
 
     command -v docker >/dev/null 2>&1 || {
@@ -137,11 +158,7 @@ check() {
     TRITON_ACCOUNT=$(triton account get | awk -F": " '/id:/{print $2}')
     if [ ! "$docker_user" = "$TRITON_USER" ] || [ ! "$docker_dc" = "$TRITON_DC" ]; then
         echo
-        tput rev  # reverse
-        tput bold # bold
         echo 'Error! The Triton CLI configuration does not match the Docker CLI configuration.'
-        tput sgr0 # clear
-        echo
         echo "Docker user: ${docker_user}"
         echo "Triton user: ${TRITON_USER}"
         echo "Docker data center: ${docker_dc}"
@@ -152,11 +169,7 @@ check() {
     local triton_cns_enabled=$(triton account get | awk -F": " '/cns/{print $2}')
     if [ ! "true" == "$triton_cns_enabled" ]; then
         echo
-        tput rev  # reverse
-        tput bold # bold
         echo 'Error! Triton CNS is required and not enabled.'
-        tput sgr0 # clear
-        echo
         exit 1
     fi
 
