@@ -2,6 +2,7 @@
 _env*
 vault.keys
 *.asc
+*.asc.key
 
 # macos frustration
 .DS_Store

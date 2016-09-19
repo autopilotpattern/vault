@@ -24,48 +24,92 @@ TRITON_ACCOUNT=
 # upload public key file to Vault
 _copy_key() {
     local keyfile=$1
+    echo "Uploading public keyfile ${keyfile} to vault instance"
     docker cp ${keyfile} vault_consul-vault_1:${keyfile}
+}
+
+
+# ensure that the user has provided public key(s) and that a valid
+# threshold value has been set.
+_validate_args() {
+    if [ -z ${KEYS} ]; then
+        echo 'You must supply at least one public keyfile!'
+        exit 1
+    fi
+    if [ -z ${THRESHOLD} ]; then
+        if [ ${#KEYS[@]} -lt 2 ]; then
+            echo 'No threshold provided; 1 key will be required to unseal vault'
+            THRESHOLD=1
+        else
+            echo 'No threshold provided; 2 keys will be required to unseal vault'
+            THRESHOLD=2
+        fi
+    fi
+    if [ ${THRESHOLD} -gt ${#KEYS[@]} ]; then
+        echo 'Threshold is greater than the number of keys!'
+        exit 1
+    fi
+    if [ ${#KEYS[@]} -gt 1 ] && [ ${THRESHOLD} -lt 2 ]; then
+        echo 'Threshold must be greater than 1 if you have multiple keys!'
+        exit 1
+    fi
+}
+
+_split_encrypted_keys() {
+    for i in "${!KEYS[@]}"; do
+        keyNum=$(($i+1))
+        awk -F': ' "/^Unseal Key $keyNum \(hex\)/{print \$2}" vault.keys > "${KEYS[$i]}.key"
+        echo "Created encrypted key file for ${KEYS[$i]}: ${KEYS[$i]}.key"
+    done
+}
+
+_print_root_token() {
+    grep 'Initial Root Token' vault.keys
 }
 
 # upload PGP keys passed in as comma-separated file names and
 # then initialized the vault with those keys. The first key
 # will be used in unseal() so it should be your key
 init() {
-    # TODO: make sure we actually have at least 2 keys!
-    IFS=',' read -r -a keys <<< "${1}"
-    for key in ${keys[@]}
+    IFS=',' read -r -a KEYS <<< "${KEYS_ARG}"
+    _validate_args
+    for key in ${KEYS[@]}
     do
         _copy_key ${key}
     done
-
-    docker exec -it vault_consul-vault_1 vault init \
+    echo docker exec -it vault_consul-vault_1 vault init \
            -address='http://127.0.0.1:8200' \
-           -key-shares=${#keys[@]} \
-           -key-threshold=2 \
-           -pgp-keys="${1}" > vault.keys 2>&1 \
-    && echo 'Vault initialized. Distribute ./vault.keys as required.'
+           -key-shares=${#KEYS[@]} \
+           -key-threshold=${THRESHOLD} \
+           -pgp-keys="${KEYS_ARG}" \
+    && echo 'Vault initialized.'
+
+    echo
+    _split_encrypted_keys
+    _print_root_token
+    echo 'Distribute encrypted key files to operators for unsealing.'
 }
 
-# use the first two encrypted keys downloaded in vault.keys to unseal all vault nodes
-# TODO: this really should be done by multiple people
+# use the encrypted keyfile to unseal all vault nodes. this needs to be
+# performed by a minimum number of operators equal to the threshold set
+# when initializing
 unseal() {
-    echo 'Decrypting first key locally...'
-    head -n 1 vault.keys | awk -F': ' '{print $2}' | xxd -r -p | gpg -d
+    local keyfile=$1
+    if [ -z ${keyfile} ]; then
+        echo 'You must provide an encrypted key file!'; exit 1
+    elif [ ! -f ${keyfile} ]; then
+        echo "${keyfile} not found."; exit 1
+    fi
+
+    echo 'Decrypting key. You may be prompted for your key password...'
+    cat ${keyfile} | xxd -r -p | gpg -d
 
     echo
     echo 'Use the token above when prompted while we unseal each Vault node...'
-    docker exec -it vault_consul-vault_1 vault unseal -address='http://127.0.0.1:8200'
-    docker exec -it vault_consul-vault_2 vault unseal -address='http://127.0.0.1:8200'
-    docker exec -it vault_consul-vault_3 vault unseal -address='http://127.0.0.1:8200'
-
-    echo 'Decrypting second key locally...'
-    head -n 3 vault.keys | tail -n 1 | awk -F': ' '{print $2}' | xxd -r -p | gpg -d
-
-    echo
-    echo 'Use the token above when prompted while we unseal each Vault node...'
-    docker exec -it vault_consul-vault_1 vault unseal -address='http://127.0.0.1:8200'
-    docker exec -it vault_consul-vault_2 vault unseal -address='http://127.0.0.1:8200'
-    docker exec -it vault_consul-vault_3 vault unseal -address='http://127.0.0.1:8200'
+    for i in {1..3}; do
+        docker exec -it vault_consul-vault_$i \
+             vault unseal -address='http://127.0.0.1:8200'
+    done
 }
 
 
@@ -130,26 +174,19 @@ check() {
 # ---------------------------------------------------
 # parse arguments
 
-# Get function list
-funcs=($(declare -F -p | cut -d " " -f 3))
-
-until
-    if [ ! -z "$1" ]; then
-        # check if the first arg is a function in this file, or use a default
-        if [[ " ${funcs[@]} " =~ " $1 " ]]; then
-            cmd=$1
-            shift 1
-        fi
-
-        $cmd "$@"
-        if [ $? == 127 ]; then
-            help
-        fi
-
-        exit
-    else
-        check
-    fi
-do
-    echo
+while getopts ":k:t-:" optchar; do
+    case "${optchar}" in
+        -)
+            case "${OPTARG}" in
+                threshold) THRESHOLD="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
+                keys) KEYS_ARG="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
+                *) echo "Unknown option";;
+            esac;;
+        t) THRESHOLD="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
+        k) KEYS_ARG="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
+        *) cmd=${OPTARG}
+    esac
 done
+
+shift $(expr $OPTIND - 1 )
+$cmd "$@"
