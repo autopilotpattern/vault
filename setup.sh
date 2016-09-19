@@ -34,12 +34,6 @@ TRITON_USER=
 TRITON_DC=
 TRITON_ACCOUNT=
 
-# ---------------------------------------------------
-# Top-level commands
-
-# to create a key:
-# gpg --gen-key
-# gpg --export "My Username <me@example.com>" | base64 > mykey.asc
 
 # upload public key file to Vault
 _copy_key() {
@@ -97,11 +91,11 @@ init() {
     do
         _copy_key ${key}
     done
-    echo docker exec -it vault_consul-vault_1 vault init \
+    docker exec -it vault_consul-vault_1 vault init \
            -address='http://127.0.0.1:8200' \
            -key-shares=${#KEYS[@]} \
            -key-threshold=${THRESHOLD} \
-           -pgp-keys="${KEYS_ARG}" \
+           -pgp-keys="${KEYS_ARG}" > vault.keys \
     && echo 'Vault initialized.'
 
     echo
@@ -149,6 +143,11 @@ check() {
         echo 'See https://www.joyent.com/blog/introducing-the-triton-command-line-tool'
         exit 1
     }
+    command -v gpg >/dev/null 2>&1 || {
+        echo
+        echo 'Error! GPG is not installed!'
+        exit 1
+    }
 
     # make sure Docker client is pointed to the same place as the Triton client
     local docker_user=$(docker info 2>&1 | awk -F": " '/SDCAccount:/{print $2}')
@@ -187,19 +186,17 @@ check() {
 # ---------------------------------------------------
 # parse arguments
 
-while getopts ":k:t-:" optchar; do
-    case "${optchar}" in
-        -)
-            case "${OPTARG}" in
-                threshold) THRESHOLD="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
-                keys) KEYS_ARG="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
-                *) echo "Unknown option";;
-            esac;;
-        t) THRESHOLD="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
-        k) KEYS_ARG="${!OPTIND}"; OPTIND=$(( $OPTIND + 1 ));;
-        *) cmd=${OPTARG}
+while true; do
+    case $1 in
+        -t | --threshold ) THRESHOLD=$2; shift 2;;
+        -k | --keys ) KEYS_ARG=$2; shift 2;;
+        check | init | unseal | help) cmd=$1; shift; break;;
+        *) break;;
     esac
 done
 
-shift $(expr $OPTIND - 1 )
-$cmd "$@"
+if [ -z $cmd ]; then
+    help
+    exit
+fi
+$cmd $@
