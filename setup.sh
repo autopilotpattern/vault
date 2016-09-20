@@ -39,7 +39,7 @@ TRITON_ACCOUNT=
 _copy_key() {
     local keyfile=$1
     echo "Uploading public keyfile ${keyfile} to vault instance"
-    docker cp ${keyfile} vault_consul-vault_1:${keyfile}
+    docker cp secrets/${keyfile} vault_consul-vault_1:${keyfile}
 }
 
 
@@ -72,19 +72,21 @@ _validate_args() {
 _split_encrypted_keys() {
     for i in "${!KEYS[@]}"; do
         keyNum=$(($i+1))
-        awk -F': ' "/^Unseal Key $keyNum \(hex\)/{print \$2}" vault.keys > "${KEYS[$i]}.key"
+        awk -F': ' "/^Unseal Key $keyNum \(hex\)/{print \$2}" \
+            secrets/vault.keys > "secrets/${KEYS[$i]}.key"
         echo "Created encrypted key file for ${KEYS[$i]}: ${KEYS[$i]}.key"
     done
 }
 
 _print_root_token() {
-    grep 'Initial Root Token' vault.keys
+    grep 'Initial Root Token' secrets/vault.keys
 }
 
 # upload PGP keys passed in as comma-separated file names and
 # then initialized the vault with those keys. The first key
 # will be used in unseal() so it should be your key
 init() {
+    mkdir -p secrets/
     IFS=',' read -r -a KEYS <<< "${KEYS_ARG}"
     _validate_args
     for key in ${KEYS[@]}
@@ -95,7 +97,7 @@ init() {
            -address='http://127.0.0.1:8200' \
            -key-shares=${#KEYS[@]} \
            -key-threshold=${THRESHOLD} \
-           -pgp-keys="${KEYS_ARG}" > vault.keys \
+           -pgp-keys="${KEYS_ARG}" > secrets/vault.keys \
     && echo 'Vault initialized.'
 
     echo
@@ -137,49 +139,53 @@ check() {
         echo 'See https://docs.joyent.com/public-cloud/api-access/docker'
         exit 1
     }
+    if [ ${COMPOSE_FILE} != "local-compose.yml" ]; then
     command -v triton >/dev/null 2>&1 || {
         echo
         echo 'Error! Joyent Triton CLI is not installed!'
         echo 'See https://www.joyent.com/blog/introducing-the-triton-command-line-tool'
         exit 1
     }
+    fi
     command -v gpg >/dev/null 2>&1 || {
         echo
         echo 'Error! GPG is not installed!'
         exit 1
     }
 
-    # make sure Docker client is pointed to the same place as the Triton client
-    local docker_user=$(docker info 2>&1 | awk -F": " '/SDCAccount:/{print $2}')
-    local docker_dc=$(echo $DOCKER_HOST | awk -F"/" '{print $3}' | awk -F'.' '{print $1}')
-    TRITON_USER=$(triton profile get | awk -F": " '/account:/{print $2}')
-    TRITON_DC=$(triton profile get | awk -F"/" '/url:/{print $3}' | awk -F'.' '{print $1}')
-    TRITON_ACCOUNT=$(triton account get | awk -F": " '/id:/{print $2}')
-    if [ ! "$docker_user" = "$TRITON_USER" ] || [ ! "$docker_dc" = "$TRITON_DC" ]; then
-        echo
-        echo 'Error! The Triton CLI configuration does not match the Docker CLI configuration.'
-        echo "Docker user: ${docker_user}"
-        echo "Triton user: ${TRITON_USER}"
-        echo "Docker data center: ${docker_dc}"
-        echo "Triton data center: ${TRITON_DC}"
-        exit 1
-    fi
+    if [ ${COMPOSE_FILE} != "local-compose.yml" ]; then
+        # make sure Docker client is pointed to the same place as the Triton client
+        local docker_user=$(docker info 2>&1 | awk -F": " '/SDCAccount:/{print $2}')
+        local docker_dc=$(echo $DOCKER_HOST | awk -F"/" '{print $3}' | awk -F'.' '{print $1}')
+        TRITON_USER=$(triton profile get | awk -F": " '/account:/{print $2}')
+        TRITON_DC=$(triton profile get | awk -F"/" '/url:/{print $3}' | awk -F'.' '{print $1}')
+        TRITON_ACCOUNT=$(triton account get | awk -F": " '/id:/{print $2}')
+        if [ ! "$docker_user" = "$TRITON_USER" ] || [ ! "$docker_dc" = "$TRITON_DC" ]; then
+            echo
+            echo 'Error! The Triton CLI configuration does not match the Docker CLI configuration.'
+            echo "Docker user: ${docker_user}"
+            echo "Triton user: ${TRITON_USER}"
+            echo "Docker data center: ${docker_dc}"
+            echo "Triton data center: ${TRITON_DC}"
+            exit 1
+        fi
 
-    local triton_cns_enabled=$(triton account get | awk -F": " '/cns/{print $2}')
-    if [ ! "true" == "$triton_cns_enabled" ]; then
-        echo
-        echo 'Error! Triton CNS is required and not enabled.'
-        exit 1
-    fi
+        local triton_cns_enabled=$(triton account get | awk -F": " '/cns/{print $2}')
+        if [ ! "true" == "$triton_cns_enabled" ]; then
+            echo
+            echo 'Error! Triton CNS is required and not enabled.'
+            exit 1
+        fi
 
-    # setup environment file
-    if [ ! -f "_env" ]; then
-        echo '# Consul bootstrap via Triton CNS' >> _env
-        echo CONSUL=consul.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
-        echo >> _env
-    else
-        echo 'Existing _env file found, exiting'
-        exit
+        # setup environment file
+        if [ ! -f "_env" ]; then
+            echo '# Consul bootstrap via Triton CNS' >> _env
+            echo CONSUL=consul.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
+            echo >> _env
+        else
+            echo 'Existing _env file found, exiting'
+            exit
+        fi
     fi
 }
 

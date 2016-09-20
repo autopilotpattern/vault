@@ -1,8 +1,6 @@
 # credentials
 _env*
-vault.keys
-*.asc
-*.asc.key
+secrets/
 
 # macos frustration
 .DS_Store
