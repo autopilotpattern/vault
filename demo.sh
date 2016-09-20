@@ -5,22 +5,25 @@ set -e
 project=vault
 service=consul-vault
 vault="${project}_${service}"
+compose_file=local-compose.yml
+
+reverse=$(tput rev)
+bold=$(tput bold)
+unbold=$(tput sgr0)
+
 
 # this demonstration will add new keys to the user's keyring, so we need
 # to make sure they know that before continuing and give them the option
 # to bail out and use their own key
 _ask() {
-    tput rev
-    tput bold
     cat << EOF
-This demonstration of Autopilot Pattern Vault will create a 3-node Vault
+${reverse}${bold}This demonstration of Autopilot Pattern Vault will create a 3-node Vault
 cluster, including initializing and unsealing the Vault with GPG keys.
 The demonstration will create a new trusted key in your key ring but remove
 it when the demonstration is done. Alternately, you can pass a key fingerprint
 as an argument to this demo and it will use that key instead. The private key
-will not be exported or leave this machine!
+will not be exported or leave this machine!${unbold}
 EOF
-    tput sgr0
     echo
     read -rsp $'Press any key to continue or Ctrl-C to cancel...\n' -n1 key
     echo
@@ -28,9 +31,7 @@ EOF
 
 # prints the argument bold and then resets the terminal colors
 bold() {
-    tput bold
-    echo "${1}"
-    tput sgr0
+    echo "${bold_text}${1}${unbold_text}"
 }
 
 
@@ -38,14 +39,14 @@ _check() {
     echo
     bold '* Checking your setup...'
     echo "./setup.sh check"
-    ./setup.sh check
+    #./setup.sh check
 }
 
 _up() {
     echo
     bold '* Standing up the Vault cluster...'
-    docker-compose up -d
-    docker-compose scale "${service}"=3
+    docker-compose -f "${compose_file}" up -d
+    docker-compose -f "${compose_file}" scale "${service}"=3
 }
 
 _wait_for_consul() {
@@ -57,10 +58,11 @@ _wait_for_consul() {
         echo -n '.'
         sleep 1
     done
-    echo
+    reset # something here is breaking the terminal
 }
 
 _key() {
+    echo
     if [ -z ${KEY_ARG} ]; then
         bold '* Creating PGP key...'
         gpg -q --batch --gen-key <<EOF
@@ -71,12 +73,11 @@ Name-Email: example@example.com
 Expire-Date: 0
 %commit
 EOF
-        echo -e \\033c
         gpg --export 'Example User <example@example.com>' | base64 > example.asc
         KEYFILE="example.asc"
         bold '* Created a PGP key and exported the public key to ./example.asc'
     else
-        bold "* Exporting PGP public key ${KEY_ARG} to file"
+        bold '* Exporting PGP public key ${KEY_ARG} to file'
         gpg --export "${KEY_ARG} | base64 > ${KEY_ARG}.asc"
         KEYFILE="${KEY_ARG}.asc"
     fi
@@ -84,9 +85,9 @@ EOF
 
 _init() {
     echo
-    bold "* Initializing the vault with your PGP key. If you had multiple keys you"
-    bold "  would pass these into the setup script as follows:"
-    echo "  ./setup.sh -k 'mykey1.asc,mykey2.asc' -t 2 init"
+    bold '* Initializing the vault with your PGP key. If you had multiple keys you'
+    bold '  would pass these into the setup script as follows:'
+    echo '  ./setup.sh -k 'mykey1.asc,mykey2.asc' -t 2 init'
     echo
     echo "./setup.sh -k ${KEYFILE} -t 1 init"
     ./setup.sh -k "${KEYFILE}" -t 1 init
@@ -94,16 +95,16 @@ _init() {
 
 _unseal() {
     echo
-    bold "* Unsealing the vault with your PGP key. If you had multiple keys,"
-    bold "  each operator would unseal the vault with their own key as follows:"
-    echo "  ./setup.sh unseal mykey1.asc.key"
+    bold '* Unsealing the vault with your PGP key. If you had multiple keys,';
+    bold '  each operator would unseal the vault with their own key as follows:'
+    echo '  ./setup.sh unseal mykey1.asc.key'
     echo
     echo "./setup.sh unseal ${KEYFILE}.key"
     ./setup.sh unseal "${KEYFILE}.key"
 }
 
 cleanup() {
-    bold "* Deleting the key associated with the example user"
+    bold '* Deleting the key associated with the example user'
     local key=$(gpg --list-keys 'Example User <example@example.com>' | awk -F'/| +' '/pub/{print $3}')
     gpg --delete-secret-keys $key
     gpg --delete-keys $key
