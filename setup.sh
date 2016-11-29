@@ -398,6 +398,15 @@ _demo_unseal() {
     COMPOSE_FILE=${COMPOSE_FILE} ./setup.sh unseal "secrets/${PGP_KEYFILE}.key"
 }
 
+_demo_policy() {
+    echo
+    bold '* Adding an example ACL policy. Use the token you received previously';
+    bold '  when prompted.'
+    echo
+    echo "./setup.sh policy secret ./policies/example.hcl"
+    policy secret ./policies/example.hcl
+}
+
 clean() {
     bold '* Deleting the key(s) associated with the example user'
     local key=$(gpg --list-keys 'Example User <example@example.com>' | awk -F'/| +' '/pub/{print $3}')
@@ -426,6 +435,7 @@ demo() {
     _demo_wait_for_consul
     _demo_init
     _demo_unseal
+    _demo_policy
 }
 
 
