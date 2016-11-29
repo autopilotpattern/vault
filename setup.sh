@@ -57,6 +57,8 @@ EOF
 }
 
 # project and service name
+repo=autopilotpattern/vault
+project_version=0.1
 project=vault
 service=consul-vault
 vault="${project}_${service}"
@@ -319,14 +321,17 @@ _cert() {
     [ -f "secrets/consul-vault.csr.pem" ] && echo 'TLS certificate exists!' && return
     [ -f "secrets/consul-vault.cert.pem" ] && echo 'TLS certificate exists!' && return
 
+    echo
     bold '* Creating a private key for Consul and Vault...'
     openssl genrsa -out "secrets/consul-vault.key.pem" 2048
 
+    echo
     bold '* Generating a Certificate Signing Request for Consul and Vault...'
     openssl req -config ${openssl_config} \
             -key "secrets/consul-vault.key.pem" \
             -new -sha256 -out "secrets/consul-vault.csr.pem"
 
+    echo
     bold '* Generating a TLS certificate for Consul and Vault...'
     openssl x509 -req -days 365 -sha256 \
             -CA "${ca}/ca_cert.pem" \
@@ -335,6 +340,7 @@ _cert() {
             -in "secrets/consul-vault.csr.pem" \
             -out "secrets/consul-vault.cert.pem" \
 
+    echo
     bold '* Verifying certificate...'
     openssl x509 -noout -text \
             -in "secrets/consul-vault.cert.pem"
@@ -421,6 +427,18 @@ demo() {
     _demo_unseal
 }
 
+
+build() {
+    docker build --tag autopilotpattern/vault .
+}
+
+ship() {
+    local githash=$(git rev-parse --short HEAD)
+    docker tag ${repo}:latest ${repo}:${project_version}-${githash}
+    docker push ${repo}:latest
+    docker push ${repo}:${project_version}-${githash}
+}
+
 # ---------------------------------------------------
 # parse arguments
 
@@ -428,7 +446,7 @@ while true; do
     case $1 in
         -t | --threshold ) THRESHOLD=$2; shift 2;;
         -k | --keys ) KEYS_ARG=$2; shift 2;;
-        check | check_* | up | init | unseal | policy | demo | help) cmd=$1; shift; break;;
+        check | check_* | up | init | unseal | policy | demo | build | ship | help) cmd=$1; shift; break;;
         *) break;;
     esac
 done
