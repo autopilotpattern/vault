@@ -36,9 +36,8 @@ vault-health() {
     _log '#TODO'
 }
 
-
 _log() {
-    echo "    $(date -u '+%Y-%m-%d %H:%M:%S') containerpilot: $@"
+    echo "containerpilot: $@"
 }
 
 # ---------------------------------------------------
