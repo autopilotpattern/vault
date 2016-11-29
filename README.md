@@ -12,6 +12,10 @@ Bootstrapping Consul is identical to [autopilotpattern/consul](https://github.co
 
 When run locally for testing, we don't have access to Triton CNS. The local-compose.yml file uses the v2 Compose API, which automatically creates a user-defined network and allows us to use Docker DNS for the service.
 
+### Consul encryption
+
+Consul provides a mechanism to encrypt both the gossip protocol (via symmetric encryption with a token) and the RPC protocol (via TLS certificates). These shared key and certificate must be present at the time we start Consul. This mechanism precludes us from using the ContainerPilot `preStart` to configure the encryption unless we embed the keys within the image or as environment variables. Instead, after the cluster is launched but before we initialize Vault, we'll use `docker exec` to install all the appropriate key material, update the configuration to use it, and restart the cluster.
+
 ### Key Sharing
 
 When the Vault is first initialized it is in a sealed state and a number of keys are created that can be used to unseal it. Vault uses Shamir Secret Splitting so that `-key-shares` number of keys are created and `-key-theshold` number of those keys are required to unseal the Vault. If `vault init` is used without providing the `-pgp-keys` argument these keys are presented to the user in plaintext. This blueprint expects that the the `-pgp-keys` argument will be passed. An encrypted secret will be provided for each PGP key provided, and only the holder of the PGP private key will be able to unseal or reseal the Vault.
@@ -90,6 +94,19 @@ Once you've seen the demo, you'll want to run the stack as you will in productio
 **`setup.sh check`:** Checks that your Triton and Docker environment is sane and configures an environment file `_env` with a CNS record for Consul. We'll use this CNS name to bootstrap the Consul cluster.
 
 **`setup.sh up`:** Starts the Vault cluster via Docker Compose and waits for all instances to be up. Once instances are up, it will poll Consul's status to ensure the raft has been created.
+
+**`setup.sh secure`:** Generates a token for gossip encryption and uploads the TLS cert for RPC encryption to the Consul cluster, updates the Consul configuration file to use these keys, and SIGHUPs all the instances. This should be run before the Vault is initialized and unsealed. Use the following options:
+
+	--tls-key/-k <val>:
+		The file containing the TLS key (in PEM format) used to encrypt RPC.
+
+	--tls-cert/-c <val>:
+		The file containing the TLS cert (in PEM format) used to encrypt RPC.
+
+	--ca-cert/-a <val>:
+		The file containing the CA cert (in PEM format) used to sign the TLS
+		cert. If the cert is self-signed or signed by a CA found in the
+		container's certificate chain, this argument may be omitted.
 
 **`setup.sh init`:** Initializes a started Vault cluster. Creates encrypted keyfiles for each operator's public key, which should be redistributed back to operators out-of-band. Use the following options:
 

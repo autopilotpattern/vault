@@ -1,6 +1,7 @@
 # credentials
 _env*
 secrets/
+etc/consul-tls.json
 
 # macos frustration
 .DS_Store

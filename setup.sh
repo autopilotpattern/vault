@@ -14,6 +14,24 @@ setup.sh up:
 	to be up. Once instances are up, it will poll Consul's status to ensure the
 	raft has been created.
 
+setup.sh secure:
+	Generates a token for gossip encryption and uploads the TLS cert for RPC
+	encryption to the Consul cluster, updates the Consul configuration file to
+	use these keys, and SIGHUPs all the instances. This should be run before the
+	Vault is initialized and unsealed. Use the following options:
+
+	--tls-key/-k <val>:
+		The file containing the TLS key (in PEM format) used to encrypt RPC.
+
+	--tls-cert/-c <val>:
+		The file containing the TLS cert (in PEM format) used to encrypt RPC.
+
+	--ca-cert/-a <val>:
+		The file containing the CA cert (in PEM format) used to sign the TLS
+		cert. If the cert is self-signed or signed by a CA found in the
+		container's certificate chain, this argument may be omitted.
+
+
 setup.sh init:
 	Initializes a started Vault cluster. Creates encrypted keyfiles for each
 	operator's public key, which should be redistributed back to operators
@@ -67,6 +85,9 @@ COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml}
 # TLS setup paths
 openssl_config=/usr/local/etc/openssl/openssl.cnf
 ca=secrets/CA
+tls_cert=
+tls_key=
+ca_cert=
 
 # formatting
 fmt_rev=$(tput rev)
@@ -89,6 +110,60 @@ _copy_key() {
     docker cp secrets/${keyfile} ${vault}_1:${keyfile}
 }
 
+# create gossip token, and install token and keys on Consul instances
+# to encrypt both gossip and RPC
+secure() {
+
+    while true; do
+        case $1 in
+            -k | --tls-key ) tls_key=$2; shift 2;;
+            -c | --tls-cert ) tls_cert=$2; shift 2;;
+            -a | --ca-cert ) ca_cert=$2; shift 2;;
+            -g | --gossip ) gossipKey=$2; shift 2;;
+            *) break;;
+        esac
+    done
+
+    if [ -z ${gossipKey} ]; then
+        echo 'Gossip key not provided; will be generated at secrets/gossip.key'
+        gossipKey=$(docker exec -it ${vault}_1 consul keygen | tr -d '\r')
+        echo ${gossipKey} > secrets/gossip.key
+    fi
+
+    if [ -z ${ca_cert} ]; then
+        echo "CA cert not provided. Assuming self-signed or already in cert store"
+    elif [ ! -f ${ca_cert} ]; then
+        echo "CA cert ${ca_cert} does not exist. Exiting!"; exit 1
+    fi
+    if [ ! -f ${tls_cert} ]; then
+        echo "TLS cert ${tls_cert} does not exist. Exiting!"; exit 1
+    fi
+    if [ ! -f ${tls_key} ]; then
+        echo "TLS key ${tls_key} does not exist. Exiting!"; exit 1
+    fi
+
+    local tls_config=./etc/consul-tls.json
+
+    json -f /etc/consul.json \
+         -e $(printf 'this.ca_file="/etc/ssl/certs/%s"' $(basename ${ca_cert})) \
+         -e $(printf 'this.cert_file="/etc/ssl/certs/%s"' $(basename ${tls_cert})) \
+         -e $(printf 'this.key_file="/etc/ssl/private/%s"' $(basename ${tls_key})) \
+         -e $(printf 'this.encrypt="%s"' "${gossipKey}") \
+         > ${tls_config}
+    exit
+    for i in {1..3}; do
+        docker exec -it ${vault}_$i mkdir -p /etc/ssl/private
+        docker cp ${ca_cert} ${vault}_$i:/etc/ssl/certs/$(basename ${ca_cert})
+        docker cp ${tls_cert} ${vault}_$i:/etc/ssl/certs/$(basename ${tls_cert})
+        docker cp ${tls_key} ${vault}_$i:/etc/ssl/private/$(basename ${tls_key})
+        docker cp ${tls_config} ${vault}_$i:/etc/consul/consul.json
+    done
+
+    # unfortunately we can't do a graceful reload here
+    echo
+    echo 'Restarting cluster with new configuration'
+    docker-compose restart ${service}
+}
 
 # ensure that the user has provided public key(s) and that a valid
 # threshold value has been set.
@@ -275,6 +350,12 @@ _demo_up() {
     docker-compose -f "${COMPOSE_FILE}" scale "${service}"=3
 }
 
+_demo_secure() {
+    echo
+    bold '* Encrypting Consul gossip and RPC'
+    secure
+}
+
 _demo_wait_for_consul() {
     echo
     bold '* Waiting for Consul to form raft...'
@@ -289,7 +370,7 @@ _demo_wait_for_consul() {
 
 
 check_tls() {
-    if [ -z "${TLS_CERT}" ] || [ -z "${TLS_KEY}" ]; then
+    if [ -z "${tls_cert}" ] || [ -z "${tls_key}" ]; then
         cat << EOF
 ${fmt_rev}${fmt_bold}You have not provided a value for --tls-cert or --tls-key. In the next step we
 will create a temporary certificate authority in the secrets/ directory and use
@@ -302,6 +383,8 @@ EOF
         _ca
         _cert
     fi
+    [ -f "${tls_cert}" ] || echo "${tls_cert} does not exist!" && exit 1
+    [ -f "${tls_key}" ] || echo "${tls_key} does not exist!" && exit 1
 }
 
 
@@ -316,6 +399,7 @@ _ca() {
     openssl req -new -x509 -days 3650 -extensions v3_ca \
             -keyout "${ca}/ca_key.pem" -out "${ca}/ca_cert.pem" \
             -config "${openssl_config}"
+    ca_cert="${ca}/ca_cert.pem"
 }
 
 _cert() {
@@ -326,31 +410,32 @@ _cert() {
     echo
     bold '* Creating a private key for Consul and Vault...'
     openssl genrsa -out "secrets/consul-vault.key.pem" 2048
+    tls_key="secrets/consul-vault.key.pem"
 
     echo
     bold '* Generating a Certificate Signing Request for Consul and Vault...'
     openssl req -config ${openssl_config} \
-            -key "secrets/consul-vault.key.pem" \
+            -key "${tls_key}" \
             -new -sha256 -out "secrets/consul-vault.csr.pem"
 
     echo
     bold '* Generating a TLS certificate for Consul and Vault...'
     openssl x509 -req -days 365 -sha256 \
-            -CA "${ca}/ca_cert.pem" \
+            -CA "${ca_cert}" \
             -CAkey "${ca}/ca_key.pem" \
             -CAcreateserial \
             -in "secrets/consul-vault.csr.pem" \
             -out "secrets/consul-vault.cert.pem" \
+    tls_cert="secrets/consul-vault.cert.pem"
 
     echo
     bold '* Verifying certificate...'
-    openssl x509 -noout -text \
-            -in "secrets/consul-vault.cert.pem"
+    openssl x509 -noout -text -in "${tls_key}"
 }
 
 
 check_pgp() {
-    if [ -z ${PGP_KEY} ]; then
+    if [ -z ${pgp_key} ]; then
         cat << EOF
 ${fmt_rev}${fmt_bold}You have not provided a value for --pgp-key. In the next step we will create a
 trusted PGP keypair in your GPG key ring. The public key will be uploaded to the
@@ -373,9 +458,9 @@ EOF
         PGP_KEYFILE="example.asc"
         bold '* Created a PGP key and exported the public key to ./secrets/example.asc'
     else
-        bold '* Exporting PGP public key ${PGP_KEY_ARG} to file'
-        gpg --export "${PGP_KEY_ARG}" | base64 > secrets/${PGP_KEY_ARG}.asc
-        PGP_KEYFILE="secrets/${PGP_KEY_ARG}.asc"
+        bold '* Exporting PGP public key ${pgp_key} to file'
+        gpg --export "${pgp_key}" | base64 > secrets/${pgp_key}.asc
+        PGP_KEYFILE="secrets/${pgp_key}.asc"
     fi
 }
 
@@ -420,9 +505,10 @@ clean() {
 demo() {
     while true; do
         case $1 in
-            -p | --pgp-key ) PGP_KEY=$2; shift 2;;
-            -k | --tls-key ) TLS_KEY=$2; shift 2;;
-            -c | --tls-cert ) TLS_CERT=$2; shift 2;;
+            -p | --pgp-key ) pgp_key=$2; shift 2;;
+            -k | --tls-key ) tls_key=$2; shift 2;;
+            -c | --tls-cert ) tls_cert=$2; shift 2;;
+            -a | --ca-cert ) ca_cert=$2; shift 2;;
             -f | --compose-file ) COMPOSE_FILE=$2; shift 2;;
             _ca | check_* | clean | help) cmd=$1; shift 1; $cmd; exit;;
             *) break;;
@@ -434,6 +520,7 @@ demo() {
     check_triton
     _demo_up
     _demo_wait_for_consul
+    _demo_secure
     _demo_init
     _demo_unseal
     _demo_policy
@@ -456,9 +543,7 @@ ship() {
 
 while true; do
     case $1 in
-        -t | --threshold ) THRESHOLD=$2; shift 2;;
-        -k | --keys ) KEYS_ARG=$2; shift 2;;
-        check | check_* | up | init | unseal | policy | demo | build | ship | help) cmd=$1; shift; break;;
+        check | check_* | up | secure | init | unseal | policy | demo | build | ship | help) cmd=$1; shift; break;;
         *) break;;
     esac
 done
