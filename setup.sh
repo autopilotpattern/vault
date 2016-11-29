@@ -187,7 +187,8 @@ policy() {
     fi
 
     docker cp ${policyfile} ${vault}_1:/tmp/${policyfile}
-    docker exec -ti ${vault}_1 \
+    docker exec -it ${vault}_1 vault auth
+    docker exec -it ${vault}_1 \
            vault policy-write ${policyname} /tmp/${policyfile}
 }
 
