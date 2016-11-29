@@ -103,6 +103,24 @@ TRITON_ACCOUNT=
 bold() {
     echo "${fmt_bold}${1}${fmt_reset}"
 }
+
+# checks that a file exists and exits with an error if not
+_file_or_exit() {
+    if [ ! -f "${1}" ]; then
+        echo "${2}"
+        exit 1
+    fi
+}
+
+# checks if a variable is set and exits with an error if not
+# usage: _var_or_exit myvar "text of error"
+_var_or_exit() {
+    if [ -z ${!1} ]; then
+        echo "${2}"
+        exit 1
+    fi
+}
+
 # upload public key file to Vault
 _copy_key() {
     local keyfile=$1
@@ -132,15 +150,10 @@ secure() {
 
     if [ -z ${ca_cert} ]; then
         echo "CA cert not provided. Assuming self-signed or already in cert store"
-    elif [ ! -f ${ca_cert} ]; then
-        echo "CA cert ${ca_cert} does not exist. Exiting!"; exit 1
     fi
-    if [ ! -f ${tls_cert} ]; then
-        echo "TLS cert ${tls_cert} does not exist. Exiting!"; exit 1
-    fi
-    if [ ! -f ${tls_key} ]; then
-        echo "TLS key ${tls_key} does not exist. Exiting!"; exit 1
-    fi
+    _file_or_exit "${ca_cert}" "CA cert ${ca_cert} does not exist. Exiting!"
+    _file_or_exit "${tls_cert}" "TLS cert ${tls_cert} does not exist. Exiting!"
+    _file_or_exit "${tls_key}" "TLS cert ${tls_key} does not exist. Exiting!"
 
     local tls_config=./etc/consul-tls.json
 
@@ -168,10 +181,7 @@ secure() {
 # ensure that the user has provided public key(s) and that a valid
 # threshold value has been set.
 _validate_args() {
-    if [ -z ${KEYS} ]; then
-        echo 'You must supply at least one public keyfile!'
-        exit 1
-    fi
+    _var_or_exit KEYS 'You must supply at least one public keyfile!'
     if [ -z ${THRESHOLD} ]; then
         if [ ${#KEYS[@]} -lt 2 ]; then
             echo 'No threshold provided; 1 key will be required to unseal vault'
@@ -233,11 +243,8 @@ init() {
 # when initializing
 unseal() {
     local keyfile=$1
-    if [ -z ${keyfile} ]; then
-        echo 'You must provide an encrypted key file!'; exit 1
-    elif [ ! -f ${keyfile} ]; then
-        echo "${keyfile} not found."; exit 1
-    fi
+    _var_or_exit keyfile 'You must provide an encrypted key file!'
+    _file_or_exit "${keyfile}" "${keyfile} not found."
 
     echo 'Decrypting key. You may be prompted for your key password...'
     cat ${keyfile} | xxd -r -p | gpg -d
@@ -255,11 +262,8 @@ unseal() {
 policy() {
     local policyname=$1
     local policyfile=$2
-    if [ -z ${policyname} ]; then
-        echo 'You must provide a name for the policy!'; exit 1
-    elif [ ! -f ${policyfile} ]; then
-        echo "${policyfile} not found."; exit 1
-    fi
+    _var_or_exit policyname 'You must provide a name for the policy!'
+    _file_or_exit "${policyfile}" "${policyfile} not found."
 
     docker cp ${policyfile} ${vault}_1:/tmp/$(basename ${policyfile})
     docker exec -it ${vault}_1 vault auth -address='http://127.0.0.1:8200'
@@ -383,14 +387,13 @@ EOF
         _ca
         _cert
     fi
-    [ -f "${tls_cert}" ] || echo "${tls_cert} does not exist!" && exit 1
-    [ -f "${tls_key}" ] || echo "${tls_key} does not exist!" && exit 1
+    _file_or_exit "${tls_cert}" "${tls_cert} does not exist!"
+    _file_or_exit "${tls_key}" "${tls_key} does not exist!"
 }
-
 
 _ca() {
     [ -f "${ca}/ca_key.pem" ] && echo 'CA exists' && return
-    [ -f "${ca}/ca_cert.pem" ] && echo 'CA exists' && return
+    [ -f "${ca_cert}" ] && echo 'CA exists' && return
 
     bold '* Creating a certificate authority...'
     mkdir -p "${ca}"
@@ -403,14 +406,15 @@ _ca() {
 }
 
 _cert() {
-    [ -f "secrets/consul-vault.key.pem" ] && echo 'TLS certificate exists!' && return
-    [ -f "secrets/consul-vault.csr.pem" ] && echo 'TLS certificate exists!' && return
-    [ -f "secrets/consul-vault.cert.pem" ] && echo 'TLS certificate exists!' && return
+    tls_key=${tls_key:-secrets/consul-vault.key.pem}
+    tls_cert=${tls_cert:-secrets/consul-vault.cert.pem}
+
+    [ -f "${tls_key}" ] && echo 'TLS certificate exists!' && return
+    [ -f "${tls_cert}" ] && echo 'TLS certificate exists!' && return
 
     echo
     bold '* Creating a private key for Consul and Vault...'
-    openssl genrsa -out "secrets/consul-vault.key.pem" 2048
-    tls_key="secrets/consul-vault.key.pem"
+    openssl genrsa -out "${tls_key}" 2048
 
     echo
     bold '* Generating a Certificate Signing Request for Consul and Vault...'
@@ -425,12 +429,11 @@ _cert() {
             -CAkey "${ca}/ca_key.pem" \
             -CAcreateserial \
             -in "secrets/consul-vault.csr.pem" \
-            -out "secrets/consul-vault.cert.pem" \
-    tls_cert="secrets/consul-vault.cert.pem"
+            -out "${tls_cert}"
 
     echo
     bold '* Verifying certificate...'
-    openssl x509 -noout -text -in "${tls_key}"
+    openssl x509 -noout -text -in "${tls_cert}"
 }
 
 
