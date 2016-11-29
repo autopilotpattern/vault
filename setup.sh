@@ -186,10 +186,11 @@ policy() {
         echo "${policyfile} not found."; exit 1
     fi
 
-    docker cp ${policyfile} ${vault}_1:/tmp/${policyfile}
-    docker exec -it ${vault}_1 vault auth
+    docker cp ${policyfile} ${vault}_1:/tmp/$(basename ${policyfile})
+    docker exec -it ${vault}_1 vault auth -address='http://127.0.0.1:8200'
     docker exec -it ${vault}_1 \
-           vault policy-write ${policyname} /tmp/${policyfile}
+           vault policy-write -address='http://127.0.0.1:8200' \
+           $(basename ${policyname}) /tmp/${policyfile}
 }
 
 
