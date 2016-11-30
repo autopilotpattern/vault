@@ -8,8 +8,6 @@ consul-vault:
       - triton.cns.services=vault,consul
     restart: always
     mem_limit: 128m
-    ports:
-        - 8500
     dns:
        - 127.0.0.1
     env_file:
