@@ -78,7 +78,7 @@ EOF
 repo=autopilotpattern/vault
 project_version=0.1
 project=vault
-service=consul-vault
+service=vault
 vault="${project}_${service}"
 COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml}
 
@@ -323,8 +323,9 @@ check() {
 
         # setup environment file
         if [ ! -f "_env" ]; then
-            echo '# Consul bootstrap via Triton CNS' >> _env
+            echo '# Bootstrap via Triton CNS' >> _env
             echo CONSUL=consul.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
+            echo VAULT=vault.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
             echo >> _env
         else
             echo 'Existing _env file found, exiting'
@@ -349,7 +350,7 @@ _demo_up() {
     echo
     bold '* Standing up the Vault cluster...'
     echo "docker-compose -f ${COMPOSE_FILE} up -d"
-    docker-compose -f "${COMPOSE_FILE}" up -d
+    docker-compose -f "${COMPOSE_FILE}" up -d vault consul
     echo "docker-compose -f ${COMPOSE_FILE} scale ${service}=3"
     docker-compose -f "${COMPOSE_FILE}" scale "${service}"=3
 }

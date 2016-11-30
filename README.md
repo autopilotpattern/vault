@@ -4,7 +4,7 @@
 
 ## Architecture
 
-This application blueprint consists of a single Docker container image. We run Consul with ContainerPilot, with Hashicorp Vault running as a ContainerPilot [co-process](https://www.joyent.com/containerpilot/docs/coprocesses). Vault is running under HA mode and using Consul as its storage backend. The Consul deployment is the same as that in the [HA Consul](https://github.com/autopilotpattern/consul) blueprint; this container image's Dockerfile extends that image.
+This application blueprint consists of Vault running in the same Docker container as its Consul storage backend. We run Consul with ContainerPilot, with Hashicorp Vault running as a ContainerPilot [co-process](https://www.joyent.com/containerpilot/docs/coprocesses). Vault is running under HA mode. The Consul configuration is the same as that in the [HA Consul](https://github.com/autopilotpattern/consul) blueprint; this container image's Dockerfile extends that image. This blueprint also includes another Consul cluster (a single-node cluster) which stands in for the service discovery cluster that you'll use to advertise Vault to consuming applications.
 
 ### Bootstrapping Consul
 
