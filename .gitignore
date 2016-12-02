@@ -1,7 +1,7 @@
 # credentials
 _env*
-vault.keys
-*.asc
+secrets/
+etc/consul-tls.json
 
 # macos frustration
 .DS_Store

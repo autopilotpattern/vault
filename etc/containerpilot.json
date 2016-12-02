@@ -1,0 +1,19 @@
+{
+  "consul": "{{ .CONSUL }}:8500",
+  "preStart": ["/usr/local/bin/vault-manage", "preStart"],
+  "services": [
+    {
+      "name": "vault",
+      "port": 8200,
+      "health": ["/usr/local/bin/vault-manage", "health"],
+      "poll": 10,
+      "ttl": 25
+    }
+  ],
+  "coprocesses": [
+    {
+      "command": ["/bin/vault", "server", "-config", "/etc/vault.hcl"],
+      "restarts": "unlimited"
+    }
+  ]
+}
