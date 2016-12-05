@@ -13,7 +13,7 @@ vault-manage health:
 	Verify that both the Consul storage backend is healthy and that the Vault
 	is unsealed.
 EOF
-
+}
 
 preStart() {
     _log "Updating consul advertise address"
