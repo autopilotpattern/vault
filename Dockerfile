@@ -13,6 +13,7 @@ RUN export VAULT_CHECKSUM=4f248214e4e71da68a166de60cc0c1485b194f4a2197da641187b7
 
 # configuration files and bootstrap scripts
 COPY etc/containerpilot.json etc/
+COPY etc/consul.json etc/consul/consul.json
 COPY etc/vault.hcl etc/
 COPY bin/* /usr/local/bin/
 

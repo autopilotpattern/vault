@@ -15,9 +15,11 @@ vault-manage health:
 EOF
 }
 
+# TODO: I don't think we actually need this
 preStart() {
     _log "Updating consul advertise address"
-    sed -i "s/CONTAINERPILOT_CONSUL_IP/${CONTAINERPILOT_CONSUL_IP}/" /etc/consul/consul.json
+    sed -i "s/IP_ADDRESS/${CONTAINERPILOT_VAULT_IP}/" /etc/consul/consul.json
+    sed -i "s/IP_ADDRESS/${CONTAINERPILOT_VAULT_IP}/" /etc/vault.hcl
 }
 
 health() {

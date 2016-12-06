@@ -7,8 +7,8 @@ vault:
       - triton.cns.services=vault
     restart: always
     mem_limit: 128m
-    dns:
-       - 127.0.0.1
+    dns_search:
+      - svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com
     env_file:
       - _env
     command: >

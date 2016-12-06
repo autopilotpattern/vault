@@ -39,7 +39,8 @@ setup.sh init:
 
 	--keys/-k "<val>,<val>":
 		List of public keys used to initialize the vault. These keys
-		must be base64 encoded public keys without ASCII armoring.
+		must be base64 encoded public keys without ASCII armoring in the
+		secrets/ directory.
 	--threshold/-t <val>:
 		Optional number of keys required to unseal the vault. Defaults
 		to 1 if a single --keys argument was provided, otherwise 2.
@@ -155,47 +156,55 @@ secure() {
     _file_or_exit "${tls_cert}" "TLS cert ${tls_cert} does not exist. Exiting!"
     _file_or_exit "${tls_key}" "TLS cert ${tls_key} does not exist. Exiting!"
 
-    local tls_config=./etc/consul-tls.json
-
-    json -f /etc/consul.json \
-         -e $(printf 'this.ca_file="/etc/ssl/certs/%s"' $(basename ${ca_cert})) \
-         -e $(printf 'this.cert_file="/etc/ssl/certs/%s"' $(basename ${tls_cert})) \
-         -e $(printf 'this.key_file="/etc/ssl/private/%s"' $(basename ${tls_key})) \
+    # we're generating this file so that the gossip key doesn't end up
+    # getting committed to git
+    json -f ./etc/consul.json \
+         -e 'this.ca_file="/usr/local/share/ca-certificates/ca_cert.pem"' \
+         -e 'this.cert_file="/etc/ssl/certs/consul-vault.cert.pem"' \
+         -e 'this.key_file="/etc/ssl/private/consul-vault.key.pem"' \
          -e $(printf 'this.encrypt="%s"' "${gossipKey}") \
-         > ${tls_config}
-    exit
+         > ./etc/consul-tls.json
+
     for i in {1..3}; do
+        echo "Securing ${vault}_$i..."
+        echo " copying certificates and keys"
         docker exec -it ${vault}_$i mkdir -p /etc/ssl/private
-        docker cp ${ca_cert} ${vault}_$i:/etc/ssl/certs/$(basename ${ca_cert})
-        docker cp ${tls_cert} ${vault}_$i:/etc/ssl/certs/$(basename ${tls_cert})
-        docker cp ${tls_key} ${vault}_$i:/etc/ssl/private/$(basename ${tls_key})
-        docker cp ${tls_config} ${vault}_$i:/etc/consul/consul.json
+        docker cp ${ca_cert} ${vault}_$i:/usr/local/share/ca-certificates/ca_cert.pem
+        docker cp ${tls_cert} ${vault}_$i:/etc/ssl/certs/consul-vault.cert.pem
+        docker cp ${tls_key} ${vault}_$i:/etc/ssl/private/consul-vault.key.pem
+
+        echo " updating Consul and Vault configuration for TLS"
+        docker cp ./etc/consul-tls.json ${vault}_$i:/etc/consul/consul.json
+        docker cp ./etc/vault-tls.hcl ${vault}_$i:/etc/vault.hcl
+
+        echo " updating trusted root certificate (ignore the following warning)"
+        docker exec -it ${vault}_$i update-ca-certificates
     done
 
     # unfortunately we can't do a graceful reload here
     echo
     echo 'Restarting cluster with new configuration'
-    docker-compose restart ${service}
+    docker-compose -f ${COMPOSE_FILE} restart ${service}
 }
 
 # ensure that the user has provided public key(s) and that a valid
 # threshold value has been set.
 _validate_args() {
     _var_or_exit KEYS 'You must supply at least one public keyfile!'
-    if [ -z ${THRESHOLD} ]; then
+    if [ -z ${threshold} ]; then
         if [ ${#KEYS[@]} -lt 2 ]; then
             echo 'No threshold provided; 1 key will be required to unseal vault'
-            THRESHOLD=1
+            threshold=1
         else
             echo 'No threshold provided; 2 keys will be required to unseal vault'
-            THRESHOLD=2
+            threshold=2
         fi
     fi
-    if [ ${THRESHOLD} -gt ${#KEYS[@]} ]; then
+    if [ ${threshold} -gt ${#KEYS[@]} ]; then
         echo 'Threshold is greater than the number of keys!'
         exit 1
     fi
-    if [ ${#KEYS[@]} -gt 1 ] && [ ${THRESHOLD} -lt 2 ]; then
+    if [ ${#KEYS[@]} -gt 1 ] && [ ${threshold} -lt 2 ]; then
         echo 'Threshold must be greater than 1 if you have multiple keys!'
         exit 1
     fi
@@ -211,25 +220,35 @@ _split_encrypted_keys() {
 }
 
 _print_root_token() {
-    grep 'Initial Root Token' secrets/vault.keys
+    grep 'Initial Root Token' secrets/vault.keys || {
+        echo 'Failed to initialize Vault'
+        exit 1
+    }
 }
 
 # upload PGP keys passed in as comma-separated file names and
 # then initialized the vault with those keys. The first key
 # will be used in unseal() so it should be your key
 init() {
+    while true; do
+        case $1 in
+            -k | --keys ) keys_arg=$2; shift 2;;
+            -t | --threshold ) threshold=$2; shift 2;;
+            *) break;;
+        esac
+    done
     mkdir -p secrets/
-    IFS=',' read -r -a KEYS <<< "${KEYS_ARG}"
+    IFS=',' read -r -a KEYS <<< "${keys_arg}"
     _validate_args
     for key in ${KEYS[@]}
     do
         _copy_key ${key}
     done
     docker exec -it ${vault}_1 vault init \
-           -address='http://127.0.0.1:8200' \
+           -address='https://127.0.0.1:8200' \
            -key-shares=${#KEYS[@]} \
-           -key-threshold=${THRESHOLD} \
-           -pgp-keys="${KEYS_ARG}" > secrets/vault.keys \
+           -key-threshold=${threshold} \
+           -pgp-keys="${keys_arg}" > secrets/vault.keys \
     && echo 'Vault initialized.'
 
     echo
@@ -250,10 +269,11 @@ unseal() {
     cat ${keyfile} | xxd -r -p | gpg -d
 
     echo
-    echo 'Use the token above when prompted while we unseal each Vault node...'
+    echo 'Use the unseal key above when prompted while we unseal each Vault node...'
+    echo
     for i in {1..3}; do
         docker exec -it ${vault}_$i \
-             vault unseal -address='http://127.0.0.1:8200'
+             vault unseal -address='https://127.0.0.1:8200'
     done
 }
 
@@ -266,10 +286,10 @@ policy() {
     _file_or_exit "${policyfile}" "${policyfile} not found."
 
     docker cp ${policyfile} ${vault}_1:/tmp/$(basename ${policyfile})
-    docker exec -it ${vault}_1 vault auth -address='http://127.0.0.1:8200'
+    docker exec -it ${vault}_1 vault auth -address='https://127.0.0.1:8200'
     docker exec -it ${vault}_1 \
-           vault policy-write -address='http://127.0.0.1:8200' \
-           $(basename ${policyname}) /tmp/${policyfile}
+           vault policy-write -address='https://127.0.0.1:8200' \
+           ${policyname} /tmp/$(basename ${policyfile})
 }
 
 
@@ -301,9 +321,9 @@ check() {
         # make sure Docker client is pointed to the same place as the Triton client
         local docker_user=$(docker info 2>&1 | awk -F": " '/SDCAccount:/{print $2}')
         local docker_dc=$(echo $DOCKER_HOST | awk -F"/" '{print $3}' | awk -F'.' '{print $1}')
-        TRITON_USER=$(triton profile get | awk -F": " '/account:/{print $2}')
-        TRITON_DC=$(triton profile get | awk -F"/" '/url:/{print $3}' | awk -F'.' '{print $1}')
-        TRITON_ACCOUNT=$(triton account get | awk -F": " '/id:/{print $2}')
+        export TRITON_USER=$(triton profile get | awk -F": " '/account:/{print $2}')
+        export TRITON_DC=$(triton profile get | awk -F"/" '/url:/{print $3}' | awk -F'.' '{print $1}')
+        export TRITON_ACCOUNT=$(triton account get | awk -F": " '/id:/{print $2}')
         if [ ! "$docker_user" = "$TRITON_USER" ] || [ ! "$docker_dc" = "$TRITON_DC" ]; then
             echo
             echo 'Error! The Triton CLI configuration does not match the Docker CLI configuration.'
@@ -328,8 +348,7 @@ check() {
             echo VAULT=vault.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
             echo >> _env
         else
-            echo 'Existing _env file found, exiting'
-            exit
+            echo 'Existing _env file found'
         fi
     fi
 }
@@ -338,7 +357,7 @@ check_triton() {
     echo
     bold '* Checking your setup...'
     echo './setup.sh check'
-    COMPOSE_FILE=${COMPOSE_FILE} ./setup.sh check
+    check
 }
 
 up() {
@@ -358,7 +377,8 @@ _demo_up() {
 _demo_secure() {
     echo
     bold '* Encrypting Consul gossip and RPC'
-    secure
+    echo "./setup.sh secure -k ${tls_key} -c ${tls_cert} -a ${ca_cert}"
+    secure -k ${tls_key} -c ${tls_cert} -a ${ca_cert}
 }
 
 _demo_wait_for_consul() {
@@ -393,7 +413,7 @@ EOF
 }
 
 _ca() {
-    [ -f "${ca}/ca_key.pem" ] && echo 'CA exists' && return
+    [ -f "${ca}/ca_key.pem" ] && echo 'CA exists' && ca_cert="${ca}/ca_cert.pem" && return
     [ -f "${ca_cert}" ] && echo 'CA exists' && return
 
     bold '* Creating a certificate authority...'
@@ -402,7 +422,10 @@ _ca() {
     # create a cert we can use to sign other certs (a CA)
     openssl req -new -x509 -days 3650 -extensions v3_ca \
             -keyout "${ca}/ca_key.pem" -out "${ca}/ca_cert.pem" \
-            -config "${openssl_config}"
+            -config ${openssl_config} \
+            -subj "/C=US/ST=California/L=San Francisco/O=Example/OU=Example/emailAddress=example@example.com"
+
+    # we'll use this var later
     ca_cert="${ca}/ca_cert.pem"
 }
 
@@ -419,13 +442,27 @@ _cert() {
 
     echo
     bold '* Generating a Certificate Signing Request for Consul and Vault...'
-    openssl req -config ${openssl_config} \
+
+    # the cert generation doesn't take the -config argument, so we need to
+    # create the -extfile part and then cat it together with the regular config
+    cp ${openssl_config} secrets/openssl.cnf
+    echo "[ SAN ]" > secrets/openssl-ext.cnf
+    echo "subjectAltName = DNS:consul,IP:127.0.0.1" >> secrets/openssl-ext.cnf
+    cat secrets/openssl-ext.cnf >> secrets/openssl.cnf
+
+    openssl req \
+            -config secrets/openssl.cnf \
+            -extensions SAN \
+            -reqexts SAN \
             -key "${tls_key}" \
-            -new -sha256 -out "secrets/consul-vault.csr.pem"
+            -new -sha256 -out "secrets/consul-vault.csr.pem" \
+            -subj "/C=US/ST=California/L=San Francisco/O=Example/OU=Example/CN=vault/emailAddress=example@example.com"
 
     echo
     bold '* Generating a TLS certificate for Consul and Vault...'
     openssl x509 -req -days 365 -sha256 \
+            -extensions SAN \
+            -extfile secrets/openssl-ext.cnf \
             -CA "${ca_cert}" \
             -CAkey "${ca}/ca_key.pem" \
             -CAcreateserial \
@@ -435,6 +472,7 @@ _cert() {
     echo
     bold '* Verifying certificate...'
     openssl x509 -noout -text -in "${tls_cert}"
+    #cat ${ca_cert} ${tls_cert} > secrets/bundle.pem
 }
 
 
@@ -472,10 +510,10 @@ _demo_init() {
     echo
     bold '* Initializing the vault with your PGP key. If you had multiple keys you'
     bold '  would pass these into the setup script as follows:'
-    echo '  ./setup.sh -k 'mykey1.asc,mykey2.asc' -t 2 init'
+    echo "  ./setup.sh init -k 'mykey1.asc,mykey2.asc' -t 2"
     echo
-    echo "./setup.sh -k ${PGP_KEYFILE} -t 1 init"
-    COMPOSE_FILE=${COMPOSE_FILE} ./setup.sh -k "${PGP_KEYFILE}" -t 1 init
+    echo "./setup.sh init -k ${PGP_KEYFILE} -t 1"
+    init -k "${PGP_KEYFILE}" -t 1
 }
 
 _demo_unseal() {
@@ -485,7 +523,7 @@ _demo_unseal() {
     echo '  ./setup.sh unseal secrets/mykey1.asc.key'
     echo
     echo "./setup.sh unseal ${PGP_KEYFILE}.key"
-    COMPOSE_FILE=${COMPOSE_FILE} ./setup.sh unseal "secrets/${PGP_KEYFILE}.key"
+    unseal "secrets/${PGP_KEYFILE}.key"
 }
 
 _demo_policy() {
