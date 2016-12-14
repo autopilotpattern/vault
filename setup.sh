@@ -211,6 +211,7 @@ _validate_args() {
 }
 
 _split_encrypted_keys() {
+    KEYS=${1}
     for i in "${!KEYS[@]}"; do
         keyNum=$(($i+1))
         awk -F': ' "/^Unseal Key $keyNum \(hex\)/{print \$2}" \
@@ -252,7 +253,7 @@ init() {
     && echo 'Vault initialized.'
 
     echo
-    _split_encrypted_keys
+    _split_encrypted_keys ${KEYS[@]}
     _print_root_token
     echo 'Distribute encrypted key files to operators for unsealing.'
 }
@@ -580,12 +581,16 @@ ship() {
     docker push ${repo}:${project_version}-${githash}
 }
 
+load() {
+    echo
+}
+
 # ---------------------------------------------------
 # parse arguments
 
 while true; do
     case $1 in
-        check | check_* | up | secure | init | unseal | policy | demo | build | ship | help) cmd=$1; shift; break;;
+        check | check_* | up | secure | init | unseal | policy | demo | build | ship | load | help) cmd=$1; shift; break;;
         *) break;;
     esac
 done
