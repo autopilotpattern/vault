@@ -346,7 +346,8 @@ check() {
 
         # setup environment file
         if [ ! -f "_env" ]; then
-            echo '# Bootstrap via Triton CNS' >> _env
+            echo TRITON_ACCOUNT=${TRITON_ACCOUNT} >> _env
+            echo TRITON_DC=${TRITON_DC} >> _env
             echo CONSUL=consul.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
             echo VAULT=vault.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
             echo >> _env
