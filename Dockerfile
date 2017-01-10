@@ -1,8 +1,8 @@
 FROM autopilotpattern/consul:0.7r0.7
 
 # The Vault binary
-ENV VAULT_VERSION=0.6.1
-RUN export VAULT_CHECKSUM=4f248214e4e71da68a166de60cc0c1485b194f4a2197da641187b745c8d5b8be \
+ENV VAULT_VERSION=0.6.4
+RUN export VAULT_CHECKSUM=04d87dd553aed59f3fe316222217a8d8777f40115a115dac4d88fac1611c51a6 \
     && export archive=vault_${VAULT_VERSION}_linux_amd64.zip \
     && curl -Lso /tmp/${archive} https://releases.hashicorp.com/vault/${VAULT_VERSION}/${archive} \
     && echo "${VAULT_CHECKSUM}  /tmp/${archive}" | sha256sum -c \
