@@ -138,15 +138,17 @@ secure() {
             -k | --tls-key ) tls_key=$2; shift 2;;
             -c | --tls-cert ) tls_cert=$2; shift 2;;
             -a | --ca-cert ) ca_cert=$2; shift 2;;
-            -g | --gossip ) gossipKey=$2; shift 2;;
+            -g | --gossip ) gossipKeyFile=$2; shift 2;;
             *) break;;
         esac
     done
 
-    if [ -z ${gossipKey} ]; then
+    if [ -z ${gossipKeyFile} ]; then
         echo 'Gossip key not provided; will be generated at secrets/gossip.key'
         gossipKey=$(docker exec -it ${vault}_1 consul keygen | tr -d '\r')
         echo ${gossipKey} > secrets/gossip.key
+    else
+        gossipKey=$(cat ${gossipKeyFile})
     fi
 
     if [ -z ${ca_cert} ]; then
@@ -214,7 +216,7 @@ _split_encrypted_keys() {
     KEYS=${1}
     for i in "${!KEYS[@]}"; do
         keyNum=$(($i+1))
-        awk -F': ' "/^Unseal Key $keyNum \(hex\)/{print \$2}" \
+        awk -F': ' "/^Unseal Key $keyNum/{print \$2}" \
             secrets/vault.keys > "secrets/${KEYS[$i]}.key"
         echo "Created encrypted key file for ${KEYS[$i]}: ${KEYS[$i]}.key"
     done
@@ -267,7 +269,7 @@ unseal() {
     _file_or_exit "${keyfile}" "${keyfile} not found."
 
     echo 'Decrypting key. You may be prompted for your key password...'
-    cat ${keyfile} | xxd -r -p | gpg -d
+    cat ${keyfile} | base64 -D | gpg -d
 
     echo
     echo 'Use the unseal key above when prompted while we unseal each Vault node...'
