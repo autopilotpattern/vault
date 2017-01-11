@@ -4,7 +4,7 @@
 
 ## Architecture
 
-This application blueprint consists of Vault running in the same Docker container as its Consul storage backend. We run Consul with ContainerPilot, with Hashicorp Vault running as a ContainerPilot [co-process](https://www.joyent.com/containerpilot/docs/coprocesses). Vault is running under HA mode. The Consul configuration is the same as that in the [HA Consul](https://github.com/autopilotpattern/consul) blueprint; this container image's Dockerfile extends that image. This blueprint also includes another Consul cluster (a single-node cluster) which stands in for the service discovery cluster that you'll use to advertise Vault to consuming applications.
+This application blueprint consists of Vault running in the same Docker container as its Consul storage backend. We run Consul with ContainerPilot, with Hashicorp Vault running as a ContainerPilot [co-process](https://www.joyent.com/containerpilot/docs/coprocesses). Vault is running under HA mode. The Consul configuration is the same as that in the [HA Consul](https://github.com/autopilotpattern/consul) blueprint; this container image's Dockerfile extends that image.
 
 ### Bootstrapping Consul
 
@@ -12,9 +12,9 @@ Bootstrapping Consul is identical to [autopilotpattern/consul](https://github.co
 
 When run locally for testing, we don't have access to Triton CNS. The local-compose.yml file uses the v2 Compose API, which automatically creates a user-defined network and allows us to use Docker DNS for the service.
 
-### Consul encryption
+### Encrypted communications
 
-Consul provides a mechanism to encrypt both the gossip protocol (via symmetric encryption with a token) and the RPC protocol (via TLS certificates). These shared key and certificate must be present at the time we start Consul. This mechanism precludes us from using the ContainerPilot `preStart` to configure the encryption unless we embed the keys within the image or as environment variables. Instead, after the cluster is launched but before we initialize Vault, we'll use `docker exec` to install all the appropriate key material, update the configuration to use it, and restart the cluster.
+Consul provides a mechanism to encrypt both the gossip protocol (via symmetric encryption with a token) and the RPC protocol (via TLS certificates). These shared key and certificate must be present at the time we start Consul. This precludes us from using the ContainerPilot `preStart` to configure the encryption unless we embed the keys within the image or as environment variables. Instead, after the cluster is launched but before we initialize Vault, we'll use `docker exec` to install all the appropriate key material, update the configuration to use it, and restart the cluster.
 
 ### Key Sharing
 
@@ -26,11 +26,10 @@ The Vault health check will check to make sure that we're unsealed and not adver
 
 The operator will then initialize one of the Vault nodes. To do so, the operator provides a PGP public key file for each user and a script will take these files and initialize the vault with `-key-shares` equal to the number of keys provided and `-key-threshold=2` (so that any two of the operators can unseal or force it to be rekeyed -- this is the minimum). The script will then decrypt the operator's own Vault key and use it to unseal all the Vault nodes. The script will also provide the operator with the root key, which will get used to set up ACLs for client applications (see below).
 
-Once the Vaults are unsealed and the Vault is healthy, the Consul service's `onChange` handler will notice and generate a gossip encryption key and add this to the Consul cluster via `consul keyring`, thereby encrypting all gossip communication between Consul servers.
 
 ### High Availability
 
-Vault elects a primary via locks in Consul. If the primary fails, a new node will become the primary. Other nodes will automatically redirect via client requests (with an HTTP307) to the primary. If a node is restarted or a new node created it will be sealed and unable to enter the pool until it's manually unsealed.
+Vault elects a primary via locks in Consul. If the primary fails, a new node will become the primary. Other nodes will automatically forward client requests to the primary. If a node is restarted or a new node created it will be sealed and unable to enter the pool until it's manually unsealed.
 
 ---
 
