@@ -1,4 +1,4 @@
-FROM autopilotpattern/consul:0.7r0.7
+FROM autopilotpattern/consul:0.7.2-r0.7.2
 
 # The Vault binary
 ENV VAULT_VERSION=0.6.4
