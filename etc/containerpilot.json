@@ -1,5 +1,5 @@
 {
-  "consul": "{{ .CONSUL }}:8500",
+  "consul": "{{ .VAULT }}:8500",
   "preStart": ["/usr/local/bin/vault-manage", "preStart"],
   "services": [
     {

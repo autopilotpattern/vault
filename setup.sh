@@ -31,6 +31,9 @@ setup.sh secure:
 		cert. If the cert is self-signed or signed by a CA found in the
 		container's certificate chain, this argument may be omitted.
 
+    --gossip/-g <val>:
+        The file containing a Consul gossip key. If the argument is omitted,
+        one will be generated.
 
 setup.sh init:
 	Initializes a started Vault cluster. Creates encrypted keyfiles for each
@@ -348,7 +351,6 @@ check() {
         if [ ! -f "_env" ]; then
             echo TRITON_ACCOUNT=${TRITON_ACCOUNT} >> _env
             echo TRITON_DC=${TRITON_DC} >> _env
-            echo CONSUL=consul.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
             echo VAULT=vault.svc.${TRITON_ACCOUNT}.${TRITON_DC}.cns.joyent.com >> _env
             echo >> _env
         else
@@ -373,7 +375,7 @@ _demo_up() {
     echo
     bold '* Standing up the Vault cluster...'
     echo "docker-compose -f ${COMPOSE_FILE} up -d"
-    docker-compose -f "${COMPOSE_FILE}" up -d vault consul
+    docker-compose -f "${COMPOSE_FILE}" up -d
     echo "docker-compose -f ${COMPOSE_FILE} scale ${service}=3"
     docker-compose -f "${COMPOSE_FILE}" scale "${service}"=3
 }
