@@ -453,7 +453,7 @@ _cert() {
     # create the -extfile part and then cat it together with the regular config
     cp ${openssl_config} secrets/openssl.cnf
     echo "[ SAN ]" > secrets/openssl-ext.cnf
-    echo "subjectAltName = DNS:consul,IP:127.0.0.1" >> secrets/openssl-ext.cnf
+    echo "subjectAltName = DNS:vault,DNS:consul,IP:127.0.0.1" >> secrets/openssl-ext.cnf
     cat secrets/openssl-ext.cnf >> secrets/openssl.cnf
 
     openssl req \
