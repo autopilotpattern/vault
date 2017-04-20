@@ -68,8 +68,9 @@ setup.sh demo:
 
 	-p, --pgp-key        use this PGP key in lieu of creating a new one
 	-k, --tls-key        use this TLS key file in lieu of creating a CA and cert
-	-c, --tls-cert       use this TLS cert file in lieu of creating a CA and cert-
+	-c, --tls-cert       use this TLS cert file in lieu of creating a CA and cert
 	-f, --compose-file   use this Docker Compose manifest
+	-o, --openssl-conf   use this OpenSSL config file
 
 setup.sh demo clean:
 	Cleans up the demo PGP keys and CA.
@@ -558,6 +559,7 @@ demo() {
             -c | --tls-cert ) tls_cert=$2; shift 2;;
             -a | --ca-cert ) ca_cert=$2; shift 2;;
             -f | --compose-file ) COMPOSE_FILE=$2; shift 2;;
+            -o | --openssl-conf ) openssl_config=$2; shift 2;;
             _ca | check_* | clean | help) cmd=$1; shift 1; $cmd; exit;;
             *) break;;
         esac

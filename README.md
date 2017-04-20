@@ -46,8 +46,9 @@ If you want to see how a completed stack looks, try the demo first.
 
 	-p, --pgp-key        use this PGP key in lieu of creating a new one
 	-k, --tls-key        use this TLS key file in lieu of creating a CA and cert
-	-c, --tls-cert       use this TLS cert file in lieu of creating a CA and cert-
+	-c, --tls-cert       use this TLS cert file in lieu of creating a CA and cert
 	-f, --compose-file   use this Docker Compose manifest
+	-o, --openssl-conf   use this OpenSSL config file
 
 **`setup.sh demo clean`:** Cleans up the demo PGP keys and CA.
 
